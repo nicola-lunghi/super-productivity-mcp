@@ -111,7 +111,24 @@ const createTaskInputSchema = z
   })
   .strict();
 
+const updateTaskInputSchema = z
+  .object({
+    taskId: taskIdSchema,
+    title: taskTitleSchema.optional(),
+    notes: taskNotesSchema.optional(),
+    isDone: z.boolean().optional(),
+    projectId: projectIdSchema.optional(),
+    projectName: projectNameSchema.optional(),
+    tagIds: tagIdsSchema.optional(),
+    tagNames: tagNamesSchema.optional(),
+    dueDay: dueDaySchema.nullable().optional(),
+    dueAt: dueAtSchema.nullable().optional(),
+    timeEstimateMinutes: timeEstimateMinutesSchema.optional(),
+  })
+  .strict();
+
 type CreateTaskToolInput = z.infer<typeof createTaskInputSchema>;
+type UpdateTaskToolInput = z.infer<typeof updateTaskInputSchema>;
 type SearchTasksInput = z.infer<typeof searchTasksInputSchema>;
 type ListByTitleInput = z.infer<typeof listByTitleInputSchema>;
 type ListTodayInput = z.infer<typeof listTodayInputSchema>;
@@ -249,7 +266,7 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
     {
       capabilities: { tools: { listChanged: false } },
       instructions:
-        'Every task-changing operation is explicit. Use list_projects and list_tags to resolve project and tag names to IDs. First use search_tasks or list_today to identify a task, then pass its exact taskId to plan_task_today, start_task, stop_timer, or complete_task. Do not infer or bulk-select tasks. create_task creates exactly one task per call, only when the user asks; it lands in the Inbox unless a project is given. ensure_github_issue_task is idempotent and never plans the task unless planToday=true.',
+        'Every task-changing operation is explicit. Use list_projects and list_tags to resolve project and tag names to IDs. First use search_tasks or list_today to identify a task, then pass its exact taskId to plan_task_today, start_task, stop_timer, or complete_task. Do not infer or bulk-select tasks. create_task creates exactly one task per call, only when the user asks; it lands in the Inbox unless a project is given. update_task changes only the fields it is given. ensure_github_issue_task is idempotent and never plans the task unless planToday=true.',
     },
   );
 
@@ -537,6 +554,48 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
           ...(timeEstimate !== undefined ? { timeEstimate } : {}),
         });
         return { created: true, task: summarizeTask(task) };
+      }, logger),
+  );
+
+  server.registerTool(
+    'update_task',
+    {
+      title: 'Update one task',
+      description:
+        'Change fields of exactly one task by ID; omitted fields stay unchanged. tagIds/tagNames replace all tags of the task. dueDay or dueAt set the due date, null clears it. Project and tag names must match exactly. Read the task first with get_task when the change depends on its current values. Only change what the user asked for: notes and tags replace the current values, so keep the existing notes and tags unless the user asked to change them.',
+      inputSchema: updateTaskInputSchema,
+      annotations: STATE_CHANGE_ANNOTATIONS,
+    },
+    async (input: UpdateTaskToolInput) =>
+      withToolErrors(async () => {
+        const { taskId, title, notes, isDone, timeEstimateMinutes } = input;
+        const due = resolveDue(input);
+        const [projectId, tagIds] = await Promise.all([
+          resolveProjectId(client, input),
+          resolveTagIds(client, input),
+        ]);
+        const changes = {
+          ...(title !== undefined ? { title } : {}),
+          ...(notes !== undefined ? { notes } : {}),
+          ...(isDone !== undefined ? { isDone } : {}),
+          ...(projectId !== undefined ? { projectId } : {}),
+          ...(tagIds !== undefined ? { tagIds } : {}),
+          ...(due ?? {}),
+          ...(timeEstimateMinutes !== undefined
+            ? { timeEstimate: minutesToMs(timeEstimateMinutes) }
+            : {}),
+        };
+        if (Object.keys(changes).length === 0) {
+          throw new AppError('INVALID_INPUT', 'Pass at least one field to change');
+        }
+        // Super Productivity 19.0.x parses short syntax out of a title only when
+        // the title is the sole change, so send the current notes along with it.
+        if (Object.keys(changes).length === 1 && title !== undefined) {
+          const current = await client.getTask(taskId);
+          Object.assign(changes, { notes: current.notes ?? '' });
+        }
+        const task = await client.updateTask(taskId, changes);
+        return { updated: true, task: summarizeTask(task) };
       }, logger),
   );
 

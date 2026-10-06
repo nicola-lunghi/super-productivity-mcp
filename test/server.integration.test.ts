@@ -493,3 +493,77 @@ describe('create_task', () => {
     await mcp.close();
   });
 });
+
+describe('update_task', () => {
+  const apiMock = () => {
+    const patches: Record<string, unknown>[] = [];
+    const current = testTask({ id: 'task-1', title: 'Paint', notes: 'Two coats needed' });
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const { pathname } = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      if (pathname === '/projects') {
+        return successResponse([{ id: 'project-home', title: 'Home Renovation' }]);
+      }
+      if (pathname === '/tags') return successResponse([{ id: 'tag-errands', title: 'errands' }]);
+      if (pathname === '/tasks/task-1' && method === 'GET') return successResponse(current);
+      if (pathname === '/tasks/task-1' && method === 'PATCH') {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        patches.push(body);
+        return successResponse({ ...current, ...body });
+      }
+      throw new Error(`Unexpected mocked API request: ${method} ${pathname}`);
+    });
+    return { fetchMock, patches };
+  };
+
+  it('sends a title-only edit together with the current notes', async () => {
+    const { fetchMock, patches } = apiMock();
+    const mcp = await connect(fetchMock);
+
+    const result = await mcp.call('update_task', { taskId: 'task-1', title: 'Paint #hallway' });
+    expect(result.isError).toBe(false);
+    expect(patches).toEqual([
+      { title: 'Paint #hallway', notes: 'Two coats needed', isIgnoreShortSyntax: true },
+    ]);
+    await mcp.close();
+  });
+
+  it('resolves names, clears the due date, and converts the estimate', async () => {
+    const { fetchMock, patches } = apiMock();
+    const mcp = await connect(fetchMock);
+
+    const result = await mcp.call('update_task', {
+      taskId: 'task-1',
+      projectName: 'home renovation',
+      tagNames: ['Errands'],
+      dueDay: null,
+      timeEstimateMinutes: 45,
+    });
+    expect(result.data).toMatchObject({ updated: true, task: { id: 'task-1' } });
+    expect(patches).toEqual([
+      {
+        projectId: 'project-home',
+        tagIds: ['tag-errands'],
+        dueDay: null,
+        dueWithTime: null,
+        timeEstimate: 2_700_000,
+      },
+    ]);
+    await mcp.close();
+  });
+
+  it.each([
+    [{}, 'INVALID_INPUT'],
+    [{ tagIds: ['TODAY'] }, 'INVALID_INPUT'],
+    [{ dueDay: '2026-10-09', dueAt: '2026-10-09T10:00:00Z' }, 'INVALID_INPUT'],
+    [{ projectName: 'Nope' }, 'PROJECT_NOT_FOUND'],
+  ])('rejects %j with %s and changes nothing', async (args, code) => {
+    const { fetchMock, patches } = apiMock();
+    const mcp = await connect(fetchMock);
+
+    const result = await mcp.call('update_task', { taskId: 'task-1', ...args });
+    expect(result.data.error.code).toBe(code);
+    expect(patches).toEqual([]);
+    await mcp.close();
+  });
+});

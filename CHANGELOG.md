@@ -13,6 +13,8 @@ All notable changes to this project are documented here.
 - Added a `create_task` tool: Inbox by default, optional project and tags by ID or exact name,
   due day or time, estimate, notes, and subtasks.
   Like `ensure_github_issue_task`, it rejects titles containing short syntax.
+- Added an `update_task` tool that changes title, notes, done state, project, tags, due date, or
+  estimate of one task; omitted fields stay unchanged.
 
 ### Fixed
 

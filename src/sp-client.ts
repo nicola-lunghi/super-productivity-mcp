@@ -39,9 +39,14 @@ export interface CreateTaskInput {
 }
 
 export interface UpdateTaskInput {
+  readonly title?: string;
+  readonly notes?: string;
   readonly isDone?: boolean;
+  readonly projectId?: string;
+  readonly tagIds?: readonly string[];
   readonly dueDay?: string | null;
   readonly dueWithTime?: number | null;
+  readonly timeEstimate?: number;
 }
 
 type FetchLike = typeof fetch;
@@ -120,7 +125,8 @@ export class SuperProductivityClient {
   async updateTask(taskId: string, input: UpdateTaskInput): Promise<SpTask> {
     return this.request(taskIdPath(taskId), SpTaskSchema, {
       method: 'PATCH',
-      body: input,
+      // Builds that know isIgnoreShortSyntax store an edited title literally.
+      body: input.title === undefined ? input : { ...input, isIgnoreShortSyntax: true },
     });
   }
 
