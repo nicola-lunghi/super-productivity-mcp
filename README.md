@@ -66,7 +66,9 @@ The expected response contains `"server":"up"` and `"rendererReady":true`.
 | Tool                          | Purpose                                     |         Changes state |
 | ----------------------------- | ------------------------------------------- | --------------------: |
 | `health` / `check_connection` | Check the local API and renderer            |                    No |
-| `search_tasks`                | Find tasks and return stable IDs            |                    No |
+| `search_tasks`                | Find tasks by title, project, or tag        |                    No |
+| `list_projects`               | List project IDs and titles                 |                    No |
+| `list_tags`                   | List tag IDs and titles                     |                    No |
 | `list_today`                  | List tasks already planned for Today        |                    No |
 | `plan_task_today`             | Plan exactly one supplied task ID for Today |                   Yes |
 | `start_task`                  | Start exactly one supplied task ID          |                   Yes |

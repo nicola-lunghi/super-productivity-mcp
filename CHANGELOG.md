@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Added read-only `list_projects` and `list_tags` tools so clients can resolve names to IDs.
+- Added a `tagId` filter to `search_tasks`.
+
 ## [0.1.5] - 2026-08-03
 
 ### Fixed

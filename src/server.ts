@@ -18,9 +18,16 @@ const searchTasksInputSchema = z
   .object({
     query: z.string().trim().min(1).max(200).optional(),
     projectId: z.string().trim().min(1).max(256).optional(),
+    tagId: z.string().trim().min(1).max(256).optional(),
     includeDone: z.boolean().optional().default(false),
     source: z.enum(['active', 'archived', 'all']).optional().default('active'),
     limit: limitSchema,
+  })
+  .strict();
+
+const listByTitleInputSchema = z
+  .object({
+    query: z.string().trim().min(1).max(200).optional(),
   })
   .strict();
 
@@ -66,6 +73,7 @@ const ensureGithubIssueInputSchema = z
   .strict();
 
 type SearchTasksInput = z.infer<typeof searchTasksInputSchema>;
+type ListByTitleInput = z.infer<typeof listByTitleInputSchema>;
 type ListTodayInput = z.infer<typeof listTodayInputSchema>;
 type TaskActionInput = z.infer<typeof taskActionInputSchema>;
 type PlanTaskTodayInput = z.infer<typeof planTaskTodayInputSchema>;
@@ -180,6 +188,7 @@ const withToolErrors = async <T extends Record<string, unknown>>(
 const taskListOptions = (input: SearchTasksInput): ListTasksOptions => ({
   ...(input.query ? { query: input.query } : {}),
   ...(input.projectId ? { projectId: input.projectId } : {}),
+  ...(input.tagId ? { tagId: input.tagId } : {}),
   includeDone: input.includeDone,
   source: input.source as TaskSource,
 });
@@ -193,7 +202,7 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
     {
       capabilities: { tools: { listChanged: false } },
       instructions:
-        'Every task-changing operation is explicit. First use search_tasks or list_today to identify a task, then pass its exact taskId to plan_task_today, start_task, stop_timer, or complete_task. Do not infer or bulk-select tasks. ensure_github_issue_task is the only tool that may create a task, and it is idempotent; it never plans the task unless planToday=true.',
+        'Every task-changing operation is explicit. Use list_projects and list_tags to resolve project and tag names to IDs. First use search_tasks or list_today to identify a task, then pass its exact taskId to plan_task_today, start_task, stop_timer, or complete_task. Do not infer or bulk-select tasks. ensure_github_issue_task is the only tool that may create a task, and it is idempotent; it never plans the task unless planToday=true.',
     },
   );
 
@@ -243,7 +252,7 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
     {
       title: 'Search Super Productivity tasks',
       description:
-        'Find tasks by title or project. Returns task IDs for explicit follow-up actions.',
+        'Find tasks by title, project, or tag. Returns task IDs for explicit follow-up actions.',
       inputSchema: searchTasksInputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
@@ -256,6 +265,48 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
           totalMatches: tasks.length,
           returned: limited.length,
           truncated: tasks.length > limited.length,
+        };
+      }, logger),
+  );
+
+  server.registerTool(
+    'list_projects',
+    {
+      title: 'List Super Productivity projects',
+      description:
+        'List project IDs and titles, optionally filtered by a case-insensitive title substring. Use the IDs with search_tasks or ensure_github_issue_task.',
+      inputSchema: listByTitleInputSchema,
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async (input: ListByTitleInput) =>
+      withToolErrors(async () => {
+        const projects = await client.listProjects(input.query);
+        return {
+          projects: projects.map((project) => ({
+            id: project.id,
+            title: project.title,
+            isArchived: project.isArchived ?? false,
+          })),
+          total: projects.length,
+        };
+      }, logger),
+  );
+
+  server.registerTool(
+    'list_tags',
+    {
+      title: 'List Super Productivity tags',
+      description:
+        'List tag IDs and titles, optionally filtered by a case-insensitive title substring. Use the IDs with search_tasks. TODAY is a virtual tag: search_tasks with tagId TODAY returns tasks due today, and plan_task_today adds a task to it; it is never stored on a task.',
+      inputSchema: listByTitleInputSchema,
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async (input: ListByTitleInput) =>
+      withToolErrors(async () => {
+        const tags = await client.listTags(input.query);
+        return {
+          tags: tags.map((tag) => ({ id: tag.id, title: tag.title })),
+          total: tags.length,
         };
       }, logger),
   );
