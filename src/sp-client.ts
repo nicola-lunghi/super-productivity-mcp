@@ -8,10 +8,12 @@ import {
   SpEnvelopeSchema,
   SpHealthSchema,
   SpProjectSchema,
+  SpTagSchema,
   SpTaskSchema,
   type SpCurrentTaskId,
   type SpHealth,
   type SpProject,
+  type SpTag,
   type SpTask,
 } from './types.js';
 
@@ -93,6 +95,10 @@ export class SuperProductivityClient {
 
   async listProjects(query?: string): Promise<SpProject[]> {
     return this.request(withTitleQuery('/projects', query), z.array(SpProjectSchema));
+  }
+
+  async listTags(query?: string): Promise<SpTag[]> {
+    return this.request(withTitleQuery('/tags', query), z.array(SpTagSchema));
   }
 
   async getTask(taskId: string): Promise<SpTask> {

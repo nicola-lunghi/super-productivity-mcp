@@ -40,6 +40,15 @@ export const SpProjectSchema = z
 
 export type SpProject = z.infer<typeof SpProjectSchema>;
 
+export const SpTagSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string(),
+  })
+  .passthrough();
+
+export type SpTag = z.infer<typeof SpTagSchema>;
+
 export const SpHealthSchema = z
   .object({
     server: z.string(),

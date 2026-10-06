@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Added read-only `list_projects` and `list_tags` tools so clients can resolve names to IDs.
+- Added a `tagId` filter to `search_tasks`.
+
 ### Fixed
 
 - `ensure_github_issue_task` no longer inherits the project, tag, or Today due date of the view open

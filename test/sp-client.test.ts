@@ -40,6 +40,36 @@ describe('SuperProductivityClient', () => {
     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer test-token');
   });
 
+  it('lists projects and tags with an optional title query', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(successResponse([{ id: 'project-1', title: 'Home Renovation' }]))
+      .mockResolvedValueOnce(successResponse([{ id: 'tag-1', title: 'urgent' }]));
+    const client = new SuperProductivityClient(testConfig(), testLogger(), fetchMock);
+
+    await expect(client.listProjects('home & renovation')).resolves.toEqual([
+      { id: 'project-1', title: 'Home Renovation' },
+    ]);
+    await expect(client.listTags()).resolves.toEqual([{ id: 'tag-1', title: 'urgent' }]);
+
+    const [projectsUrl, projectsInit] = fetchMock.mock.calls[0] ?? [];
+    expect(String(projectsUrl)).toBe('http://127.0.0.1:3876/projects?query=home+%26+renovation');
+    expect(new Headers(projectsInit?.headers).get('authorization')).toBe('Bearer test-token');
+    const [tagsUrl] = fetchMock.mock.calls[1] ?? [];
+    expect(String(tagsUrl)).toBe('http://127.0.0.1:3876/tags');
+  });
+
+  it('rejects project and tag lists with an unexpected shape', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(successResponse([{ id: 'project-1' }]))
+      .mockResolvedValueOnce(successResponse({ id: 'tag-1', title: 'not a list' }));
+    const client = new SuperProductivityClient(testConfig(), testLogger(), fetchMock);
+
+    await expect(client.listProjects()).rejects.toMatchObject({ code: 'SP_INVALID_RESPONSE' });
+    await expect(client.listTags()).rejects.toMatchObject({ code: 'SP_INVALID_RESPONSE' });
+  });
+
   it('supports the released unauthenticated API when no token is configured', async () => {
     const task = testTask();
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(successResponse([task]));
