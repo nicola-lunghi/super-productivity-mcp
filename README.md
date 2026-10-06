@@ -67,6 +67,7 @@ The expected response contains `"server":"up"` and `"rendererReady":true`.
 | ----------------------------- | ------------------------------------------- | --------------------: |
 | `health` / `check_connection` | Check the local API and renderer            |                    No |
 | `search_tasks`                | Find tasks by title, project, or tag        |                    No |
+| `get_task`                    | Read one task with notes (and subtasks)     |                    No |
 | `list_projects`               | List project IDs and titles                 |                    No |
 | `list_tags`                   | List tag IDs and titles                     |                    No |
 | `list_today`                  | List tasks already planned for Today        |                    No |

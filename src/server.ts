@@ -45,6 +45,13 @@ const taskActionInputSchema = z
   })
   .strict();
 
+const getTaskInputSchema = z
+  .object({
+    taskId: taskIdSchema,
+    includeSubTasks: z.boolean().optional().default(false),
+  })
+  .strict();
+
 const startAtSchema = z
   .string()
   .trim()
@@ -77,6 +84,7 @@ type SearchTasksInput = z.infer<typeof searchTasksInputSchema>;
 type ListByTitleInput = z.infer<typeof listByTitleInputSchema>;
 type ListTodayInput = z.infer<typeof listTodayInputSchema>;
 type TaskActionInput = z.infer<typeof taskActionInputSchema>;
+type GetTaskInput = z.infer<typeof getTaskInputSchema>;
 type PlanTaskTodayInput = z.infer<typeof planTaskTodayInputSchema>;
 type EnsureGithubIssueInput = z.infer<typeof ensureGithubIssueInputSchema>;
 
@@ -119,9 +127,12 @@ export interface TaskSummary {
   readonly title: string;
   readonly isDone: boolean;
   readonly projectId: string | null;
+  readonly tagIds: readonly string[];
   readonly plannedForToday: boolean;
   readonly dueDay: string | null;
   readonly dueWithTime: number | null;
+  readonly deadlineDay: string | null;
+  readonly deadlineWithTime: number | null;
   readonly timeEstimate: number;
   readonly timeSpent: number;
   readonly parentId: string | null;
@@ -138,9 +149,12 @@ export const summarizeTask = (task: SpTask, date = new Date()): TaskSummary => (
   title: task.title,
   isDone: task.isDone ?? false,
   projectId: task.projectId ?? null,
+  tagIds: task.tagIds ?? [],
   plannedForToday: isToday(task, date),
   dueDay: task.dueDay ?? null,
   dueWithTime: task.dueWithTime ?? null,
+  deadlineDay: task.deadlineDay ?? null,
+  deadlineWithTime: task.deadlineWithTime ?? null,
   timeEstimate: task.timeEstimate ?? 0,
   timeSpent: task.timeSpent ?? 0,
   parentId: task.parentId ?? null,
@@ -266,6 +280,28 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
           totalMatches: tasks.length,
           returned: limited.length,
           truncated: tasks.length > limited.length,
+        };
+      }, logger),
+  );
+
+  server.registerTool(
+    'get_task',
+    {
+      title: 'Get one task',
+      description:
+        'Read one task by exact ID, including its notes. Set includeSubTasks to also return its subtasks.',
+      inputSchema: getTaskInputSchema,
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async (input: GetTaskInput) =>
+      withToolErrors(async () => {
+        const task = await client.getTask(input.taskId);
+        const subTasks = input.includeSubTasks
+          ? await Promise.all((task.subTaskIds ?? []).map((id) => client.getTask(id)))
+          : undefined;
+        return {
+          task: { ...summarizeTask(task), notes: task.notes ?? '' },
+          ...(subTasks ? { subTasks: subTasks.map((subTask) => summarizeTask(subTask)) } : {}),
         };
       }, logger),
   );

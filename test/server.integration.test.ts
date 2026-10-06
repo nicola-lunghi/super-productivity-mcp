@@ -11,6 +11,26 @@ import {
   testTask,
 } from './helpers.js';
 
+const connect = async (fetchMock: typeof fetch) => {
+  const logger = testLogger();
+  const config = testConfig();
+  const client = new SuperProductivityClient(config, logger, fetchMock);
+  const server = createMcpServer({ config, client, logger });
+  const mcpClient = new Client({ name: 'test-client', version: '0.1.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([mcpClient.connect(clientTransport), server.connect(serverTransport)]);
+  return {
+    call: async (name: string, args: Record<string, unknown> = {}) => {
+      const result = await mcpClient.callTool({ name, arguments: args });
+      return { isError: result.isError === true, data: JSON.parse(responseText(result)) };
+    },
+    close: async () => {
+      await mcpClient.close();
+      await server.close();
+    },
+  };
+};
+
 describe('MCP server integration over an in-memory transport', () => {
   it('exposes explicit tools and keeps selection separate from Today planning', async () => {
     const today = new Date();
@@ -269,5 +289,46 @@ describe('MCP server integration over an in-memory transport', () => {
     expect(requests[1]?.searchParams.has('tagId')).toBe(false);
     await mcpClient.close();
     await server.close();
+  });
+
+  it('reads one task with notes, tags, deadlines, and optional subtasks', async () => {
+    const parent = testTask({
+      id: 'parent-1',
+      title: 'Paint the hallway',
+      notes: 'Two coats needed',
+      tagIds: ['tag-1'],
+      deadlineDay: '2026-10-09',
+      subTaskIds: ['sub-1'],
+    });
+    const subTask = testTask({ id: 'sub-1', title: 'Buy primer', parentId: 'parent-1' });
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const { pathname } = new URL(String(input));
+      if (pathname === '/tasks/parent-1') return successResponse(parent);
+      if (pathname === '/tasks/sub-1') return successResponse(subTask);
+      return errorResponse('TASK_NOT_FOUND', 'Task not found', 404);
+    });
+    const mcp = await connect(fetchMock);
+
+    const plain = await mcp.call('get_task', { taskId: 'parent-1' });
+    expect(plain.data.task).toMatchObject({
+      id: 'parent-1',
+      notes: 'Two coats needed',
+      tagIds: ['tag-1'],
+      deadlineDay: '2026-10-09',
+      deadlineWithTime: null,
+      subTaskIds: ['sub-1'],
+    });
+    expect(plain.data).not.toHaveProperty('subTasks');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const withSubTasks = await mcp.call('get_task', { taskId: 'parent-1', includeSubTasks: true });
+    expect(withSubTasks.data.subTasks).toEqual([
+      expect.objectContaining({ id: 'sub-1', title: 'Buy primer', parentId: 'parent-1' }),
+    ]);
+
+    const missing = await mcp.call('get_task', { taskId: 'nope' });
+    expect(missing.isError).toBe(true);
+    expect(missing.data.error.code).toBe('TASK_NOT_FOUND');
+    await mcp.close();
   });
 });

@@ -18,6 +18,8 @@ export const SpTaskSchema = z
     notes: nullableString,
     dueDay: nullableString,
     dueWithTime: nullableNumber,
+    deadlineDay: nullableString,
+    deadlineWithTime: nullableNumber,
     timeEstimate: z.number().finite().optional(),
     timeSpent: z.number().finite().optional(),
     parentId: nullableString,

@@ -8,6 +8,8 @@ All notable changes to this project are documented here.
 
 - Added read-only `list_projects` and `list_tags` tools so clients can resolve names to IDs.
 - Added a `tagId` filter to `search_tasks`.
+- Added a read-only `get_task` tool that returns one task with its notes and, optionally, its subtasks.
+- Task summaries now include `tagIds`, `deadlineDay`, and `deadlineWithTime`.
 
 ### Fixed
 
