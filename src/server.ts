@@ -403,6 +403,14 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
           const title =
             input.title ?? `GitHub issue ${issue.number} — ${issue.owner}/${issue.repo}`;
           assertLiteralTitle(title, config.literalTitles);
+          // POST /tasks does not check the project, and a task whose project is
+          // missing or archived shows up in no project list.
+          if (input.projectId) {
+            const projects = await client.listProjects();
+            if (!projects.some((p) => p.id === input.projectId && !p.isArchived)) {
+              throw new AppError('PROJECT_NOT_FOUND', 'Project not found or archived');
+            }
+          }
           // Placement is sent explicitly: POST /tasks otherwise takes project,
           // tags and a Today due date from whichever view is open in the app.
           task = await client.createTask({

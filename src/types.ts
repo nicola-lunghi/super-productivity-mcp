@@ -30,6 +30,16 @@ export const SpTaskSchema = z
 
 export type SpTask = z.infer<typeof SpTaskSchema>;
 
+export const SpProjectSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string(),
+    isArchived: z.boolean().optional(),
+  })
+  .passthrough();
+
+export type SpProject = z.infer<typeof SpProjectSchema>;
+
 export const SpHealthSchema = z
   .object({
     server: z.string(),

@@ -8,6 +8,8 @@ All notable changes to this project are documented here.
 
 - `ensure_github_issue_task` no longer inherits the project, tag, or Today due date of the view open
   in the app; new issue tasks go to the given project or the Inbox.
+- `ensure_github_issue_task` rejects a `projectId` that does not exist or is archived with
+  `PROJECT_NOT_FOUND` instead of creating a task that shows in no project list.
 - The default title of new issue tasks is now `GitHub issue 123 — owner/repo`; the old
   `GitHub #123 — owner/repo` made Super Productivity 19.0.x ask to create a tag named `123`.
 - Custom titles containing short syntax are rejected instead of being parsed by Super Productivity.

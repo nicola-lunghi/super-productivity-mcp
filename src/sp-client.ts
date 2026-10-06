@@ -7,9 +7,11 @@ import {
   SpCurrentTaskIdSchema,
   SpEnvelopeSchema,
   SpHealthSchema,
+  SpProjectSchema,
   SpTaskSchema,
   type SpCurrentTaskId,
   type SpHealth,
+  type SpProject,
   type SpTask,
 } from './types.js';
 
@@ -65,6 +67,9 @@ const parseResponseJson = async (response: Response): Promise<unknown> => {
 
 const taskIdPath = (taskId: string, suffix = '') => `/tasks/${encodeURIComponent(taskId)}${suffix}`;
 
+const withTitleQuery = (path: string, query?: string) =>
+  query ? `${path}?${new URLSearchParams({ query }).toString()}` : path;
+
 export class SuperProductivityClient {
   constructor(
     private readonly config: AppConfig,
@@ -84,6 +89,10 @@ export class SuperProductivityClient {
     params.set('includeDone', String(options.includeDone ?? false));
     params.set('source', options.source ?? 'active');
     return this.request(`/tasks?${params.toString()}`, z.array(SpTaskSchema));
+  }
+
+  async listProjects(query?: string): Promise<SpProject[]> {
+    return this.request(withTitleQuery('/projects', query), z.array(SpProjectSchema));
   }
 
   async getTask(taskId: string): Promise<SpTask> {

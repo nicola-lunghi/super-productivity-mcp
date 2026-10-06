@@ -76,7 +76,7 @@ The expected response contains `"server":"up"` and `"rendererReady":true`.
 | `ensure_github_issue_task`    | Reuse or create one task for a GitHub issue | Yes, only when called |
 
 New issue tasks go to the given project or the Inbox, without tags or a due date, whatever view is
-open in the app. Super Productivity 19.0.x and older parse short syntax (`#tag`, `+project`,
+open in the app. A given `projectId` must exist and not be archived. Super Productivity 19.0.x and older parse short syntax (`#tag`, `+project`,
 `@date`, `!deadline`, `30m`) out of new titles, so a custom `title` containing it is rejected with
 `TITLE_HAS_SHORT_SYNTAX`; on builds that store titles literally, set `SP_LITERAL_TITLES=true`.
 

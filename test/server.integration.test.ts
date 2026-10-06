@@ -85,6 +85,9 @@ describe('MCP server integration over an in-memory transport', () => {
         return successResponse(testTask({ id: 'gh-task' }), 201);
       }
       if (url.pathname === '/tasks') return successResponse([]);
+      if (url.pathname === '/projects') {
+        return successResponse([{ id: 'project-old', title: 'Old', isArchived: true }]);
+      }
       throw new Error(`Unexpected mocked API request: ${init?.method ?? 'GET'} ${url.pathname}`);
     });
     const logger = testLogger();
@@ -116,6 +119,14 @@ describe('MCP server integration over an in-memory transport', () => {
     });
     expect(rejected.isError).toBe(true);
     expect(JSON.parse(responseText(rejected)).error.code).toBe('TITLE_HAS_SHORT_SYNTAX');
+
+    for (const projectId of ['project-old', 'project-missing']) {
+      const badProject = await mcpClient.callTool({
+        name: 'ensure_github_issue_task',
+        arguments: { issue: 'example/app#9', projectId },
+      });
+      expect(JSON.parse(responseText(badProject)).error.code).toBe('PROJECT_NOT_FOUND');
+    }
     expect(posts).toHaveLength(1);
     await mcpClient.close();
     await server.close();
