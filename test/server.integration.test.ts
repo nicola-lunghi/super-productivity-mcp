@@ -11,9 +11,12 @@ import {
   testTask,
 } from './helpers.js';
 
-const connect = async (fetchMock: typeof fetch) => {
+const connect = async (
+  fetchMock: typeof fetch,
+  configOverrides: Parameters<typeof testConfig>[0] = {},
+) => {
   const logger = testLogger();
-  const config = testConfig();
+  const config = testConfig(configOverrides);
   const client = new SuperProductivityClient(config, logger, fetchMock);
   const server = createMcpServer({ config, client, logger });
   const mcpClient = new Client({ name: 'test-client', version: '0.1.0' });
@@ -22,7 +25,10 @@ const connect = async (fetchMock: typeof fetch) => {
   return {
     call: async (name: string, args: Record<string, unknown> = {}) => {
       const result = await mcpClient.callTool({ name, arguments: args });
-      return { isError: result.isError === true, data: JSON.parse(responseText(result)) };
+      const text = responseText(result);
+      // Schema validation errors come back from the SDK as plain text, not JSON.
+      const data = text.startsWith('{') ? JSON.parse(text) : { text };
+      return { isError: result.isError === true, data };
     },
     close: async () => {
       await mcpClient.close();
@@ -329,6 +335,161 @@ describe('MCP server integration over an in-memory transport', () => {
     const missing = await mcp.call('get_task', { taskId: 'nope' });
     expect(missing.isError).toBe(true);
     expect(missing.data.error.code).toBe('TASK_NOT_FOUND');
+    await mcp.close();
+  });
+});
+
+describe('create_task', () => {
+  const projects = [
+    { id: 'INBOX_PROJECT', title: 'Inbox', isArchived: false },
+    { id: 'project-home', title: 'Home Renovation', isArchived: false },
+    { id: 'project-work-1', title: 'Work', isArchived: false },
+    { id: 'project-work-2', title: 'work', isArchived: false },
+    { id: 'project-old', title: 'Old', isArchived: true },
+  ];
+  const tags = [
+    { id: 'TODAY', title: 'Today' },
+    { id: 'tag-errands', title: 'errands' },
+    { id: 'tag-urgent', title: 'urgent' },
+  ];
+
+  const apiMock = () => {
+    const posts: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const { pathname } = new URL(String(input));
+      if (pathname === '/projects') return successResponse(projects);
+      if (pathname === '/tags') return successResponse(tags);
+      if (pathname === '/tasks' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        posts.push(body);
+        return successResponse(testTask({ id: 'new-task', ...body }), 201);
+      }
+      throw new Error(`Unexpected mocked API request: ${init?.method ?? 'GET'} ${pathname}`);
+    });
+    return { fetchMock, posts };
+  };
+
+  it('creates a literal Inbox task and overrides every view-dependent default', async () => {
+    const { fetchMock, posts } = apiMock();
+    const mcp = await connect(fetchMock);
+
+    const result = await mcp.call('create_task', { title: 'Call the plumber' });
+    expect(result.isError).toBe(false);
+    expect(result.data.task).toMatchObject({ id: 'new-task', projectId: 'INBOX_PROJECT' });
+    expect(posts).toEqual([
+      {
+        title: 'Call the plumber',
+        projectId: 'INBOX_PROJECT',
+        tagIds: [],
+        dueDay: null,
+        isIgnoreShortSyntax: true,
+      },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await mcp.close();
+  });
+
+  it('resolves exact project and tag names and converts due time and estimate', async () => {
+    const { fetchMock, posts } = apiMock();
+    const mcp = await connect(fetchMock);
+
+    const result = await mcp.call('create_task', {
+      title: 'Paint the hallway',
+      notes: 'Use the matte finish',
+      projectName: '  home RENOVATION ',
+      tagNames: ['errands', 'URGENT', 'errands'],
+      dueAt: '2026-10-09T15:00:00+02:00',
+      timeEstimateMinutes: 30,
+    });
+    expect(result.isError).toBe(false);
+    expect(posts[0]).toEqual({
+      title: 'Paint the hallway',
+      projectId: 'project-home',
+      tagIds: ['tag-errands', 'tag-urgent'],
+      dueDay: null,
+      dueWithTime: Date.parse('2026-10-09T13:00:00Z'),
+      notes: 'Use the matte finish',
+      timeEstimate: 1_800_000,
+      isIgnoreShortSyntax: true,
+    });
+    await mcp.close();
+  });
+
+  it.each([
+    [{ projectName: 'work' }, 'AMBIGUOUS_NAME'],
+    [{ projectName: 'Nope' }, 'PROJECT_NOT_FOUND'],
+    [{ projectId: 'project-old' }, 'PROJECT_NOT_FOUND'],
+    [{ projectName: 'Old' }, 'PROJECT_NOT_FOUND'],
+    [{ projectId: 'project-home', projectName: 'Home Renovation' }, 'INVALID_INPUT'],
+    [{ tagNames: ['missing'] }, 'TAG_NOT_FOUND'],
+    [{ tagIds: ['tag-nope'] }, 'TAG_NOT_FOUND'],
+    [{ tagIds: ['TODAY'] }, 'INVALID_INPUT'],
+    [{ tagNames: ['Today'] }, 'INVALID_INPUT'],
+    [{ dueDay: '2026-10-09', dueAt: '2026-10-09T10:00:00Z' }, 'INVALID_INPUT'],
+    [{ parentId: 'parent-1', projectName: 'Home Renovation' }, 'INVALID_INPUT'],
+  ])('rejects %j with %s and creates nothing', async (args, code) => {
+    const { fetchMock, posts } = apiMock();
+    const mcp = await connect(fetchMock);
+
+    const result = await mcp.call('create_task', { title: 'Task', ...args });
+    expect(result.isError).toBe(true);
+    expect(result.data.error.code).toBe(code);
+    expect(posts).toEqual([]);
+    await mcp.close();
+  });
+
+  it.each([{ dueDay: '2026-02-30' }, { dueAt: '2026-10-09T10:00:00' }, { title: '   ' }])(
+    'rejects invalid input %j before calling the API',
+    async (args) => {
+      const { fetchMock } = apiMock();
+      const mcp = await connect(fetchMock);
+
+      const result = await mcp.call('create_task', { title: 'Task', ...args });
+      expect(result.isError).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+      await mcp.close();
+    },
+  );
+
+  it('rejects titles with short syntax unless titles are stored literally', async () => {
+    const { fetchMock, posts } = apiMock();
+    const strict = await connect(fetchMock);
+
+    const rejected = await strict.call('create_task', { title: 'Paint #urgent @fri 30m' });
+    expect(rejected.isError).toBe(true);
+    expect(rejected.data.error.code).toBe('TITLE_HAS_SHORT_SYNTAX');
+    expect(rejected.data.error.message).toContain('"#urgent", "@fri", "30m"');
+    const subTask = await strict.call('create_task', { title: '+Home', parentId: 'parent-1' });
+    expect(subTask.data.error.code).toBe('TITLE_HAS_SHORT_SYNTAX');
+    expect(posts).toEqual([]);
+    await strict.close();
+
+    const literal = await connect(fetchMock, { literalTitles: true });
+    const created = await literal.call('create_task', { title: 'Paint #urgent @fri 30m' });
+    expect(created.isError).toBe(false);
+    expect(posts[0]).toMatchObject({ title: 'Paint #urgent @fri 30m', isIgnoreShortSyntax: true });
+    await literal.close();
+  });
+
+  it('creates a subtask without sending inherited project or tag fields', async () => {
+    const { fetchMock, posts } = apiMock();
+    const mcp = await connect(fetchMock);
+
+    const result = await mcp.call('create_task', {
+      title: 'Buy primer',
+      parentId: 'parent-1',
+      dueDay: '2026-10-08',
+    });
+    expect(result.isError).toBe(false);
+    expect(posts).toEqual([
+      {
+        title: 'Buy primer',
+        parentId: 'parent-1',
+        dueDay: '2026-10-08',
+        dueWithTime: null,
+        isIgnoreShortSyntax: true,
+      },
+    ]);
     await mcp.close();
   });
 });

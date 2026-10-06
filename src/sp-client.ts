@@ -32,7 +32,10 @@ export interface CreateTaskInput {
   readonly notes?: string;
   readonly projectId?: string;
   readonly tagIds?: readonly string[];
+  readonly parentId?: string;
   readonly dueDay?: string | null;
+  readonly dueWithTime?: number | null;
+  readonly timeEstimate?: number;
 }
 
 export interface UpdateTaskInput {
@@ -110,14 +113,7 @@ export class SuperProductivityClient {
       method: 'POST',
       // Builds that know isIgnoreShortSyntax store the title literally; older
       // builds drop the unknown flag and still parse short syntax out of it.
-      body: {
-        title: input.title,
-        ...(input.notes ? { notes: input.notes } : {}),
-        ...(input.projectId ? { projectId: input.projectId } : {}),
-        ...(input.tagIds ? { tagIds: input.tagIds } : {}),
-        ...(input.dueDay !== undefined ? { dueDay: input.dueDay } : {}),
-        isIgnoreShortSyntax: true,
-      },
+      body: { ...input, isIgnoreShortSyntax: true },
     });
   }
 

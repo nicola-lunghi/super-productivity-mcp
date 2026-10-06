@@ -10,6 +10,9 @@ All notable changes to this project are documented here.
 - Added a `tagId` filter to `search_tasks`.
 - Added a read-only `get_task` tool that returns one task with its notes and, optionally, its subtasks.
 - Task summaries now include `tagIds`, `deadlineDay`, and `deadlineWithTime`.
+- Added a `create_task` tool: Inbox by default, optional project and tags by ID or exact name,
+  due day or time, estimate, notes, and subtasks.
+  Like `ensure_github_issue_task`, it rejects titles containing short syntax.
 
 ### Fixed
 

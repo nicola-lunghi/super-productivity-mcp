@@ -7,6 +7,22 @@ import { addGithubMarker, findGithubIssueTask, parseGithubIssueRef } from './git
 import type { Logger } from './logger.js';
 import { assertLiteralTitle } from './short-syntax.js';
 import type { ListTasksOptions, SuperProductivityClient, TaskSource } from './sp-client.js';
+import {
+  INBOX_PROJECT_ID,
+  dueAtSchema,
+  dueDaySchema,
+  minutesToMs,
+  projectIdSchema,
+  projectNameSchema,
+  resolveDue,
+  resolveProjectId,
+  resolveTagIds,
+  tagIdsSchema,
+  tagNamesSchema,
+  taskNotesSchema,
+  taskTitleSchema,
+  timeEstimateMinutesSchema,
+} from './task-input.js';
 import type { SpTask } from './types.js';
 
 const MAX_TASK_ID_LENGTH = 256;
@@ -80,6 +96,22 @@ const ensureGithubIssueInputSchema = z
   })
   .strict();
 
+const createTaskInputSchema = z
+  .object({
+    title: taskTitleSchema,
+    notes: taskNotesSchema.optional(),
+    projectId: projectIdSchema.optional(),
+    projectName: projectNameSchema.optional(),
+    tagIds: tagIdsSchema.optional(),
+    tagNames: tagNamesSchema.optional(),
+    parentId: taskIdSchema.optional(),
+    dueDay: dueDaySchema.optional(),
+    dueAt: dueAtSchema.optional(),
+    timeEstimateMinutes: timeEstimateMinutesSchema.optional(),
+  })
+  .strict();
+
+type CreateTaskToolInput = z.infer<typeof createTaskInputSchema>;
 type SearchTasksInput = z.infer<typeof searchTasksInputSchema>;
 type ListByTitleInput = z.infer<typeof listByTitleInputSchema>;
 type ListTodayInput = z.infer<typeof listTodayInputSchema>;
@@ -217,7 +249,7 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
     {
       capabilities: { tools: { listChanged: false } },
       instructions:
-        'Every task-changing operation is explicit. Use list_projects and list_tags to resolve project and tag names to IDs. First use search_tasks or list_today to identify a task, then pass its exact taskId to plan_task_today, start_task, stop_timer, or complete_task. Do not infer or bulk-select tasks. ensure_github_issue_task is the only tool that may create a task, and it is idempotent; it never plans the task unless planToday=true.',
+        'Every task-changing operation is explicit. Use list_projects and list_tags to resolve project and tag names to IDs. First use search_tasks or list_today to identify a task, then pass its exact taskId to plan_task_today, start_task, stop_timer, or complete_task. Do not infer or bulk-select tasks. create_task creates exactly one task per call, only when the user asks; it lands in the Inbox unless a project is given. ensure_github_issue_task is idempotent and never plans the task unless planToday=true.',
     },
   );
 
@@ -447,6 +479,64 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
       withToolErrors(async () => {
         const task = await client.updateTask(input.taskId, { isDone: true });
         return { completed: true, task: summarizeTask(task) };
+      }, logger),
+  );
+
+  server.registerTool(
+    'create_task',
+    {
+      title: 'Create one task',
+      description:
+        'Create exactly one task. It goes to the Inbox unless projectId or projectName is given, and gets only the tags, due date, and estimate passed as fields (never the ones of the view open in the app). Pass parentId to create a subtask; subtasks inherit project and tags from the parent. Put project, tags, dates, and estimates in their fields, never in the title: titles containing short syntax (#tag, +project, @date, !deadline, 30m) are rejected with TITLE_HAS_SHORT_SYNTAX unless the server is configured for literal titles. Do not create a task the user did not ask for.',
+      inputSchema: createTaskInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async (input: CreateTaskToolInput) =>
+      withToolErrors(async () => {
+        assertLiteralTitle(input.title, config.literalTitles);
+        const due = resolveDue(input);
+        const timeEstimate =
+          input.timeEstimateMinutes === undefined
+            ? undefined
+            : minutesToMs(input.timeEstimateMinutes);
+
+        if (input.parentId) {
+          if (input.projectId || input.projectName || input.tagIds || input.tagNames) {
+            throw new AppError(
+              'INVALID_INPUT',
+              'Subtasks inherit project and tags from their parent; omit them when parentId is set',
+            );
+          }
+          const task = await client.createTask({
+            title: input.title,
+            parentId: input.parentId,
+            ...(input.notes !== undefined ? { notes: input.notes } : {}),
+            ...(due ?? {}),
+            ...(timeEstimate !== undefined ? { timeEstimate } : {}),
+          });
+          return { created: true, task: summarizeTask(task) };
+        }
+
+        const [projectId, tagIds] = await Promise.all([
+          resolveProjectId(client, input),
+          resolveTagIds(client, input),
+        ]);
+        // Every placement field is sent explicitly: the API otherwise fills
+        // project, tags, and Today from whatever view is open in the app.
+        const task = await client.createTask({
+          title: input.title,
+          projectId: projectId ?? INBOX_PROJECT_ID,
+          tagIds: tagIds ?? [],
+          ...(due ?? { dueDay: null }),
+          ...(input.notes !== undefined ? { notes: input.notes } : {}),
+          ...(timeEstimate !== undefined ? { timeEstimate } : {}),
+        });
+        return { created: true, task: summarizeTask(task) };
       }, logger),
   );
 

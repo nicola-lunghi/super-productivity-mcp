@@ -76,7 +76,13 @@ The expected response contains `"server":"up"` and `"rendererReady":true`.
 | `stop_timer`                  | Stop the current timer                      |                   Yes |
 | `complete_task`               | Complete exactly one supplied task ID       |                   Yes |
 | `get_current_task`            | Read the currently tracked task             |                    No |
+| `create_task`                 | Create one task (Inbox unless told)         |                   Yes |
 | `ensure_github_issue_task`    | Reuse or create one task for a GitHub issue | Yes, only when called |
+
+`create_task` sends the project, tags, and due date explicitly, so a new task never picks up
+the project, tag, or Today view that happens to be open in the app. Without a project it goes to the
+Inbox. Project and tag names must match exactly (ignoring case); ambiguous names are rejected.
+Titles containing short syntax are rejected as described below.
 
 New issue tasks go to the given project or the Inbox, without tags or a due date, whatever view is
 open in the app. A given `projectId` must exist and not be archived. Super Productivity 19.0.x and older parse short syntax (`#tag`, `+project`,
