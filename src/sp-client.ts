@@ -27,6 +27,8 @@ export interface CreateTaskInput {
   readonly title: string;
   readonly notes?: string;
   readonly projectId?: string;
+  readonly tagIds?: readonly string[];
+  readonly dueDay?: string | null;
 }
 
 export interface UpdateTaskInput {
@@ -91,10 +93,15 @@ export class SuperProductivityClient {
   async createTask(input: CreateTaskInput): Promise<SpTask> {
     return this.request('/tasks', SpTaskSchema, {
       method: 'POST',
+      // Builds that know isIgnoreShortSyntax store the title literally; older
+      // builds drop the unknown flag and still parse short syntax out of it.
       body: {
         title: input.title,
         ...(input.notes ? { notes: input.notes } : {}),
         ...(input.projectId ? { projectId: input.projectId } : {}),
+        ...(input.tagIds ? { tagIds: input.tagIds } : {}),
+        ...(input.dueDay !== undefined ? { dueDay: input.dueDay } : {}),
+        isIgnoreShortSyntax: true,
       },
     });
   }

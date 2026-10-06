@@ -75,6 +75,11 @@ The expected response contains `"server":"up"` and `"rendererReady":true`.
 | `get_current_task`            | Read the currently tracked task             |                    No |
 | `ensure_github_issue_task`    | Reuse or create one task for a GitHub issue | Yes, only when called |
 
+New issue tasks go to the given project or the Inbox, without tags or a due date, whatever view is
+open in the app. Super Productivity 19.0.x and older parse short syntax (`#tag`, `+project`,
+`@date`, `!deadline`, `30m`) out of new titles, so a custom `title` containing it is rejected with
+`TITLE_HAS_SHORT_SYNTAX`; on builds that store titles literally, set `SP_LITERAL_TITLES=true`.
+
 The server intentionally does not create GitHub issues. Use the GitHub integration or connector for
 that, then call `ensure_github_issue_task` only when you explicitly want the issue in Super
 Productivity.
@@ -154,6 +159,7 @@ The server reads configuration from environment variables:
 | `SP_API_URL`                | `http://127.0.0.1:3876` | HTTP(S) URL; loopback is enforced by default                        |
 | `SP_API_TIMEOUT_MS`         | `15000`                 | Integer from 1000 to 60000                                          |
 | `SP_ALLOW_NON_LOOPBACK_URL` | `false`                 | Use only for a trusted local proxy                                  |
+| `SP_LITERAL_TITLES`         | `false`                 | `true` only if the app stores new task titles literally             |
 | `SP_LOG_LEVEL`              | `warn`                  | `error`, `warn`, `info`, or `debug`                                 |
 
 See [.env.example](.env.example) for a copyable template.

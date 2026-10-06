@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- `ensure_github_issue_task` no longer inherits the project, tag, or Today due date of the view open
+  in the app; new issue tasks go to the given project or the Inbox.
+- The default title of new issue tasks is now `GitHub issue 123 — owner/repo`; the old
+  `GitHub #123 — owner/repo` made Super Productivity 19.0.x ask to create a tag named `123`.
+- Custom titles containing short syntax are rejected instead of being parsed by Super Productivity.
+  Set `SP_LITERAL_TITLES=true` on builds that store titles literally.
+
 ## [0.1.5] - 2026-08-03
 
 ### Fixed

@@ -5,6 +5,7 @@ import type { AppConfig } from './config.js';
 import { AppError, toPublicError } from './errors.js';
 import { addGithubMarker, findGithubIssueTask, parseGithubIssueRef } from './github.js';
 import type { Logger } from './logger.js';
+import { assertLiteralTitle } from './short-syntax.js';
 import type { ListTasksOptions, SuperProductivityClient, TaskSource } from './sp-client.js';
 import type { SpTask } from './types.js';
 
@@ -399,10 +400,17 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
           task = match.task;
           matchKind = match.kind;
         } else {
+          const title =
+            input.title ?? `GitHub issue ${issue.number} — ${issue.owner}/${issue.repo}`;
+          assertLiteralTitle(title, config.literalTitles);
+          // Placement is sent explicitly: POST /tasks otherwise takes project,
+          // tags and a Today due date from whichever view is open in the app.
           task = await client.createTask({
-            title: input.title ?? `GitHub #${issue.number} — ${issue.owner}/${issue.repo}`,
+            title,
             notes: addGithubMarker(input.notes, issue),
-            ...(input.projectId ? { projectId: input.projectId } : {}),
+            projectId: input.projectId ?? 'INBOX_PROJECT',
+            tagIds: [],
+            dueDay: null,
           });
           created = true;
           matchKind = 'created-marker';

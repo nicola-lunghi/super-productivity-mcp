@@ -75,4 +75,49 @@ describe('MCP server integration over an in-memory transport', () => {
     await mcpClient.close();
     await server.close();
   });
+
+  it('creates GitHub issue tasks with explicit placement and a literal-safe title', async () => {
+    const posts: unknown[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/tasks' && init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return successResponse(testTask({ id: 'gh-task' }), 201);
+      }
+      if (url.pathname === '/tasks') return successResponse([]);
+      throw new Error(`Unexpected mocked API request: ${init?.method ?? 'GET'} ${url.pathname}`);
+    });
+    const logger = testLogger();
+    const config = testConfig();
+    const client = new SuperProductivityClient(config, logger, fetchMock);
+    const server = createMcpServer({ config, client, logger });
+    const mcpClient = new Client({ name: 'test-client', version: '0.1.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([mcpClient.connect(clientTransport), server.connect(serverTransport)]);
+
+    await mcpClient.callTool({
+      name: 'ensure_github_issue_task',
+      arguments: { issue: 'example/app#7' },
+    });
+    expect(posts).toEqual([
+      {
+        title: 'GitHub issue 7 — example/app',
+        notes: '<!-- super-productivity-mcp:github example/app#7 -->',
+        projectId: 'INBOX_PROJECT',
+        tagIds: [],
+        dueDay: null,
+        isIgnoreShortSyntax: true,
+      },
+    ]);
+
+    const rejected = await mcpClient.callTool({
+      name: 'ensure_github_issue_task',
+      arguments: { issue: 'example/app#8', title: 'Review #8' },
+    });
+    expect(rejected.isError).toBe(true);
+    expect(JSON.parse(responseText(rejected)).error.code).toBe('TITLE_HAS_SHORT_SYNTAX');
+    expect(posts).toHaveLength(1);
+    await mcpClient.close();
+    await server.close();
+  });
 });
