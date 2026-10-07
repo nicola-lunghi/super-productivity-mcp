@@ -15,6 +15,8 @@ export interface AppConfig {
    * syntax out of new titles, so such titles are rejected instead.
    */
   readonly literalTitles: boolean;
+  /** Registers the permanent delete_task tool. Off by default. */
+  readonly enableDelete: boolean;
   readonly logLevel: LogLevel;
 }
 
@@ -88,6 +90,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): AppConfig => {
     apiTimeoutMs: parseTimeout(env.SP_API_TIMEOUT_MS),
     allowNonLoopbackUrl,
     literalTitles: parseBoolean('SP_LITERAL_TITLES', env.SP_LITERAL_TITLES, false),
+    enableDelete: parseBoolean('SP_ENABLE_DELETE', env.SP_ENABLE_DELETE, false),
     logLevel: parseLogLevel(env.SP_LOG_LEVEL),
   };
 };

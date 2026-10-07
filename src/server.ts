@@ -61,6 +61,14 @@ const taskActionInputSchema = z
   })
   .strict();
 
+const deleteTaskInputSchema = z
+  .object({
+    taskId: taskIdSchema,
+    confirmTitle: z.string().min(1).max(500),
+    includeSubTasks: z.boolean().optional().default(false),
+  })
+  .strict();
+
 const getTaskInputSchema = z
   .object({
     taskId: taskIdSchema,
@@ -134,6 +142,7 @@ type ListByTitleInput = z.infer<typeof listByTitleInputSchema>;
 type ListTodayInput = z.infer<typeof listTodayInputSchema>;
 type TaskActionInput = z.infer<typeof taskActionInputSchema>;
 type GetTaskInput = z.infer<typeof getTaskInputSchema>;
+type DeleteTaskInput = z.infer<typeof deleteTaskInputSchema>;
 type PlanTaskTodayInput = z.infer<typeof planTaskTodayInputSchema>;
 type EnsureGithubIssueInput = z.infer<typeof ensureGithubIssueInputSchema>;
 
@@ -257,6 +266,13 @@ const taskListOptions = (input: SearchTasksInput): ListTasksOptions => ({
   source: input.source as TaskSource,
 });
 
+/** True when the connected client can show the user a form (MCP form elicitation). */
+const clientSupportsFormElicitation = (server: McpServer): boolean => {
+  const elicitation = server.server.getClientCapabilities()?.elicitation;
+  // An empty elicitation capability means form mode (MCP backwards compatibility).
+  return !!elicitation && (Object.keys(elicitation).length === 0 || 'form' in elicitation);
+};
+
 export const createMcpServer = ({ config, client, logger }: ServerDependencies): McpServer => {
   const server = new McpServer(
     {
@@ -264,9 +280,12 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
       version: '0.1.0',
     },
     {
-      capabilities: { tools: { listChanged: false } },
+      capabilities: { tools: { listChanged: config.enableDelete } },
       instructions:
-        'Every task-changing operation is explicit. Use list_projects and list_tags to resolve project and tag names to IDs. First use search_tasks or list_today to identify a task, then pass its exact taskId to plan_task_today, start_task, stop_timer, or complete_task. Do not infer or bulk-select tasks. create_task creates exactly one task per call, only when the user asks; it lands in the Inbox unless a project is given. update_task changes only the fields it is given. archive_task is reversible with restore_task; there is no delete. ensure_github_issue_task is idempotent and never plans the task unless planToday=true.',
+        'Every task-changing operation is explicit. Before deciding to create, change, archive, or delete anything, load and read the full description of the tool you intend to use and follow its rules; the rules in the tool descriptions are part of these instructions. Use list_projects and list_tags to resolve project and tag names to IDs. First use search_tasks or list_today to identify a task, then pass its exact taskId to plan_task_today, start_task, stop_timer, or complete_task. Do not infer or bulk-select tasks. create_task creates exactly one task per call, only when the user asks; it lands in the Inbox unless a project is given. update_task changes only the fields it is given. archive_task is reversible with restore_task. ensure_github_issue_task is idempotent and never plans the task unless planToday=true.' +
+        (config.enableDelete
+          ? ' delete_task is permanent and is only offered to clients that can ask the user to confirm: if it is not in your tool list, deletion is not available here; suggest archive_task or deleting in the app. If it is in your tool list: use it only when the user explicitly asks to delete, prefer archive_task, and always ask the user to confirm the exact task in a separate message before calling it. Never delete several or all tasks: one confirmed task per call, no loops, no deletion by search or filter.'
+          : ' There is no delete tool.'),
     },
   );
 
@@ -644,6 +663,76 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
         return { restored: true, task: task ? summarizeTask(task) : null };
       }, logger),
   );
+
+  if (config.enableDelete) {
+    const deleteTool = server.registerTool(
+      'delete_task',
+      {
+        title: 'Delete one task permanently',
+        description:
+          'Permanently delete exactly one task, its subtasks, and their tracked time. This cannot be undone; prefer archive_task and only delete when the user explicitly asks to. Never call it in the same turn as the request from the user, even if the user asked to delete: first reply with the exact title of the task (and its subtasks, if any), say that the deletion is permanent, and ask the user to confirm. Only call it after the user answers yes in a later message; the request itself is not a confirmation. It deletes one task per call and each call needs its own confirmation for that exact task: never delete several or all tasks in a loop, never delete tasks selected by a search or a filter (such as "all done tasks" or "everything in a project"), and refuse such bulk requests, suggesting archive_task or deleting in the app instead. confirmTitle must equal the current title of the task. A task with subtasks is refused unless includeSubTasks is true. The server then asks the user to confirm in the client; clients that cannot ask (no elicitation support) cannot delete.',
+        inputSchema: deleteTaskInputSchema,
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async (input: DeleteTaskInput) =>
+        withToolErrors(async () => {
+          const task = await client.getTask(input.taskId);
+          if (input.confirmTitle.trim() !== task.title.trim()) {
+            throw new AppError(
+              'TITLE_MISMATCH',
+              'confirmTitle does not match the title of this task; read it again with get_task and confirm with the user before deleting',
+            );
+          }
+          const subTaskCount = task.subTaskIds?.length ?? 0;
+          if (subTaskCount > 0 && !input.includeSubTasks) {
+            throw new AppError(
+              'HAS_SUBTASKS',
+              `This task has ${subTaskCount} subtask(s) that would be deleted too; pass includeSubTasks: true only if the user confirmed that`,
+            );
+          }
+          // The user confirms each deletion directly in the client (MCP
+          // elicitation), so the model cannot confirm on the user's behalf.
+          // Clients that cannot ask the user cannot delete.
+          if (!clientSupportsFormElicitation(server)) {
+            throw new AppError(
+              'CONFIRMATION_UNAVAILABLE',
+              'delete_task needs an MCP client that can ask the user to confirm (form elicitation); this client cannot, so nothing was deleted. Use archive_task, or delete the task in the app.',
+            );
+          }
+          const subTaskText = subTaskCount > 0 ? ` and its ${subTaskCount} subtask(s)` : '';
+          const answer = await server.server.elicitInput({
+            mode: 'form',
+            message: `Permanently delete "${task.title}"${subTaskText}? This cannot be undone.`,
+            requestedSchema: {
+              type: 'object',
+              properties: {
+                confirm: { type: 'boolean', title: 'Delete permanently', default: false },
+              },
+              required: ['confirm'],
+            },
+          });
+          if (answer.action !== 'accept' || answer.content?.['confirm'] !== true) {
+            throw new AppError(
+              'DELETE_NOT_CONFIRMED',
+              'The user did not confirm the deletion; nothing was deleted.',
+            );
+          }
+          await client.deleteTask(task.id);
+          return { deleted: true, taskId: task.id, title: task.title, subTaskCount };
+        }, logger),
+    );
+    // Only clients that can ask the user to confirm get the tool: it stays hidden
+    // until the handshake shows that the client supports form elicitation.
+    deleteTool.disable();
+    server.server.oninitialized = () => {
+      if (clientSupportsFormElicitation(server)) deleteTool.enable();
+    };
+  }
 
   server.registerTool(
     'get_current_task',

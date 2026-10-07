@@ -80,6 +80,7 @@ The expected response contains `"server":"up"` and `"rendererReady":true`.
 | `update_task`                 | Change fields of one supplied task ID       |                   Yes |
 | `archive_task`                | Archive one task (marks it done)            |                   Yes |
 | `restore_task`                | Restore one archived task                   |                   Yes |
+| `delete_task`                 | Delete one task (opt-in, see below)         |                   Yes |
 | `ensure_github_issue_task`    | Reuse or create one task for a GitHub issue | Yes, only when called |
 
 `create_task` sends the project, tags, and due date explicitly, so a new task never picks up
@@ -87,9 +88,13 @@ the project, tag, or Today view that happens to be open in the app. Without a pr
 Inbox. Project and tag names must match exactly (ignoring case); ambiguous names are rejected.
 Titles containing short syntax are rejected as described below. `update_task` changes only the
 fields it is given; an edited title is stored literally, because it is always sent together with
-another field, which Super Productivity 19.0.x does not parse. There is no delete: `archive_task` moves a
+another field, which Super Productivity 19.0.x does not parse. To remove a task, `archive_task` moves a
 top-level task and its subtasks to the archive (Super Productivity marks them done and clears their
-due date), and `restore_task` brings them back, not done.
+due date), and `restore_task` brings them back, not done. `delete_task` deletes a task permanently and
+exists only when `SP_ENABLE_DELETE=true`; it requires `confirmTitle` to match the task's title and
+refuses tasks with subtasks unless `includeSubTasks` is true. Each deletion is then confirmed by the
+user in the MCP client through elicitation, so the model cannot confirm it on the user's behalf;
+clients without form elicitation support are not offered `delete_task` at all.
 
 New issue tasks go to the given project or the Inbox, without tags or a due date, whatever view is
 open in the app. A given `projectId` must exist and not be archived. Super Productivity 19.0.x and older parse short syntax (`#tag`, `+project`,
@@ -176,6 +181,7 @@ The server reads configuration from environment variables:
 | `SP_API_TIMEOUT_MS`         | `15000`                 | Integer from 1000 to 60000                                          |
 | `SP_ALLOW_NON_LOOPBACK_URL` | `false`                 | Use only for a trusted local proxy                                  |
 | `SP_LITERAL_TITLES`         | `false`                 | `true` only if the app stores new task titles literally             |
+| `SP_ENABLE_DELETE`          | `false`                 | `true` registers the permanent `delete_task` tool                   |
 | `SP_LOG_LEVEL`              | `warn`                  | `error`, `warn`, `info`, or `debug`                                 |
 
 See [.env.example](.env.example) for a copyable template.

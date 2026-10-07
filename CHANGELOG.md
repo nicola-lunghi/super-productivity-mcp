@@ -17,6 +17,10 @@ All notable changes to this project are documented here.
   estimate of one task; omitted fields stay unchanged.
 - Added `archive_task` and `restore_task`. Subtasks cannot be archived on their own, because
   Super Productivity 19.0.x reports success without archiving them.
+- Added an opt-in `delete_task` tool (`SP_ENABLE_DELETE=true`) that permanently deletes one task. It
+  requires `confirmTitle` to match and refuses tasks with subtasks unless `includeSubTasks` is true.
+- `delete_task` asks the user to confirm each deletion through MCP elicitation and is only offered
+  to clients that support it.
 
 ### Fixed
 

@@ -11,18 +11,34 @@ import {
   testTask,
 } from './helpers.js';
 
+// A user's answer to an elicitation dialog; omit it for a client without elicitation.
+type ElicitAnswer = {
+  action: 'accept' | 'decline' | 'cancel';
+  content?: Record<string, string | number | boolean | string[]>;
+};
+
 const connect = async (
   fetchMock: typeof fetch,
   configOverrides: Parameters<typeof testConfig>[0] = {},
+  answerElicitation?: (message: string) => ElicitAnswer,
 ) => {
   const logger = testLogger();
   const config = testConfig(configOverrides);
   const client = new SuperProductivityClient(config, logger, fetchMock);
   const server = createMcpServer({ config, client, logger });
-  const mcpClient = new Client({ name: 'test-client', version: '0.1.0' });
+  const mcpClient = new Client(
+    { name: 'test-client', version: '0.1.0' },
+    answerElicitation ? { capabilities: { elicitation: {} } } : {},
+  );
+  if (answerElicitation) {
+    mcpClient.setRequestHandler('elicitation/create', async (request) =>
+      answerElicitation(request.params.message),
+    );
+  }
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([mcpClient.connect(clientTransport), server.connect(serverTransport)]);
   return {
+    listTools: async () => (await mcpClient.listTools()).tools.map((tool) => tool.name),
     call: async (name: string, args: Record<string, unknown> = {}) => {
       const result = await mcpClient.callTool({ name, arguments: args });
       const text = responseText(result);
@@ -622,5 +638,105 @@ describe('archive_task and restore_task', () => {
     const withoutTask = await empty.call('restore_task', { taskId: 'task-1' });
     expect(withoutTask.data).toEqual({ restored: true, task: null });
     await empty.close();
+  });
+});
+
+describe('delete_task', () => {
+  const apiMock = () => {
+    const deletes: string[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const { pathname } = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      const id = pathname.split('/')[2];
+      if (method === 'GET' && id === 'task-1') {
+        return successResponse(testTask({ id: 'task-1', title: 'Paint' }));
+      }
+      if (method === 'GET' && id === 'parent-1') {
+        return successResponse(testTask({ id: 'parent-1', title: 'Paint', subTaskIds: ['s'] }));
+      }
+      if (method === 'DELETE' && id) {
+        deletes.push(id);
+        return successResponse({ deleted: true, id });
+      }
+      throw new Error(`Unexpected mocked API request: ${method} ${pathname}`);
+    });
+    return { fetchMock, deletes };
+  };
+
+  it('is not registered unless SP_ENABLE_DELETE is set', async () => {
+    const off = await connect(apiMock().fetchMock);
+    await expect(
+      off.call('delete_task', { taskId: 'task-1', confirmTitle: 'Paint' }),
+    ).rejects.toThrow('Tool delete_task not found');
+    await off.close();
+  });
+
+  it('deletes only with a matching title and explicit consent for subtasks', async () => {
+    const { fetchMock, deletes } = apiMock();
+    const messages: string[] = [];
+    const mcp = await connect(fetchMock, { enableDelete: true }, (message) => {
+      messages.push(message);
+      return { action: 'accept', content: { confirm: true } };
+    });
+
+    const mismatch = await mcp.call('delete_task', { taskId: 'task-1', confirmTitle: 'Pain' });
+    expect(mismatch.data.error.code).toBe('TITLE_MISMATCH');
+    const withSubTasks = await mcp.call('delete_task', {
+      taskId: 'parent-1',
+      confirmTitle: 'Paint',
+    });
+    expect(withSubTasks.data.error.code).toBe('HAS_SUBTASKS');
+    expect(deletes).toEqual([]);
+    expect(messages).toEqual([]);
+
+    const deleted = await mcp.call('delete_task', { taskId: 'task-1', confirmTitle: ' Paint ' });
+    expect(deleted.data).toEqual({
+      deleted: true,
+      taskId: 'task-1',
+      title: 'Paint',
+      subTaskCount: 0,
+    });
+    await mcp.call('delete_task', {
+      taskId: 'parent-1',
+      confirmTitle: 'Paint',
+      includeSubTasks: true,
+    });
+    expect(deletes).toEqual(['task-1', 'parent-1']);
+    expect(messages).toEqual([
+      'Permanently delete "Paint"? This cannot be undone.',
+      'Permanently delete "Paint" and its 1 subtask(s)? This cannot be undone.',
+    ]);
+    await mcp.close();
+  });
+
+  it.each<[string, ElicitAnswer]>([
+    ['declines', { action: 'decline' }],
+    ['cancels', { action: 'cancel' }],
+    ['accepts without ticking confirm', { action: 'accept', content: { confirm: false } }],
+  ])('deletes nothing when the user %s', async (_, answer) => {
+    const { fetchMock, deletes } = apiMock();
+    const mcp = await connect(fetchMock, { enableDelete: true }, () => answer);
+
+    const result = await mcp.call('delete_task', { taskId: 'task-1', confirmTitle: 'Paint' });
+    expect(result.data.error.code).toBe('DELETE_NOT_CONFIRMED');
+    expect(deletes).toEqual([]);
+    await mcp.close();
+  });
+
+  it('offers delete_task only to clients that can ask the user to confirm', async () => {
+    const { fetchMock, deletes } = apiMock();
+    const withoutElicitation = await connect(fetchMock, { enableDelete: true });
+    expect(await withoutElicitation.listTools()).not.toContain('delete_task');
+    await expect(
+      withoutElicitation.call('delete_task', { taskId: 'task-1', confirmTitle: 'Paint' }),
+    ).rejects.toThrow('Tool delete_task disabled');
+    expect(deletes).toEqual([]);
+    await withoutElicitation.close();
+
+    const withElicitation = await connect(fetchMock, { enableDelete: true }, () => ({
+      action: 'decline',
+    }));
+    expect(await withElicitation.listTools()).toContain('delete_task');
+    await withElicitation.close();
   });
 });

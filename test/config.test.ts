@@ -9,6 +9,7 @@ describe('loadConfig', () => {
     expect(config.apiToken).toBe('token');
     expect(config.apiTimeoutMs).toBe(15_000);
     expect(config.allowNonLoopbackUrl).toBe(false);
+    expect(config.enableDelete).toBe(false);
   });
 
   it('rejects non-loopback URLs unless explicitly enabled', () => {

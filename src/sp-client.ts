@@ -130,6 +130,14 @@ export class SuperProductivityClient {
     });
   }
 
+  async deleteTask(taskId: string): Promise<{ deleted: boolean; id: string }> {
+    return this.request(
+      taskIdPath(taskId),
+      z.object({ deleted: z.boolean(), id: z.string() }).passthrough(),
+      { method: 'DELETE' },
+    );
+  }
+
   async archiveTask(taskId: string): Promise<{ id: string; archived: boolean }> {
     return this.request(
       taskIdPath(taskId, '/archive'),
@@ -162,7 +170,7 @@ export class SuperProductivityClient {
     path: string,
     schema: z.ZodType<T>,
     options: {
-      readonly method?: 'GET' | 'POST' | 'PATCH';
+      readonly method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
       readonly body?: unknown;
       readonly requiresAuth?: boolean;
     } = {},

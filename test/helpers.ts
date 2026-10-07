@@ -8,6 +8,7 @@ export const testConfig = (overrides: Partial<AppConfig> = {}): AppConfig => ({
   apiTimeoutMs: 1_000,
   allowNonLoopbackUrl: false,
   literalTitles: false,
+  enableDelete: false,
   logLevel: 'error',
   ...overrides,
 });
