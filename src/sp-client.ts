@@ -130,6 +130,22 @@ export class SuperProductivityClient {
     });
   }
 
+  async archiveTask(taskId: string): Promise<{ id: string; archived: boolean }> {
+    return this.request(
+      taskIdPath(taskId, '/archive'),
+      z.object({ id: z.string(), archived: z.boolean() }).passthrough(),
+      { method: 'POST' },
+    );
+  }
+
+  async restoreTask(taskId: string): Promise<SpTask | null> {
+    return this.request(
+      taskIdPath(taskId, '/restore'),
+      z.union([SpTaskSchema, z.null(), z.undefined()]).transform((task) => task ?? null),
+      { method: 'POST' },
+    );
+  }
+
   async startTask(taskId: string): Promise<SpCurrentTaskId> {
     return this.request(taskIdPath(taskId, '/start'), SpCurrentTaskIdSchema, { method: 'POST' });
   }

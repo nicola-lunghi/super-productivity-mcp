@@ -15,6 +15,8 @@ All notable changes to this project are documented here.
   Like `ensure_github_issue_task`, it rejects titles containing short syntax.
 - Added an `update_task` tool that changes title, notes, done state, project, tags, due date, or
   estimate of one task; omitted fields stay unchanged.
+- Added `archive_task` and `restore_task`. Subtasks cannot be archived on their own, because
+  Super Productivity 19.0.x reports success without archiving them.
 
 ### Fixed
 

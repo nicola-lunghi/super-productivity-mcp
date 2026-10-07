@@ -266,7 +266,7 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
     {
       capabilities: { tools: { listChanged: false } },
       instructions:
-        'Every task-changing operation is explicit. Use list_projects and list_tags to resolve project and tag names to IDs. First use search_tasks or list_today to identify a task, then pass its exact taskId to plan_task_today, start_task, stop_timer, or complete_task. Do not infer or bulk-select tasks. create_task creates exactly one task per call, only when the user asks; it lands in the Inbox unless a project is given. update_task changes only the fields it is given. ensure_github_issue_task is idempotent and never plans the task unless planToday=true.',
+        'Every task-changing operation is explicit. Use list_projects and list_tags to resolve project and tag names to IDs. First use search_tasks or list_today to identify a task, then pass its exact taskId to plan_task_today, start_task, stop_timer, or complete_task. Do not infer or bulk-select tasks. create_task creates exactly one task per call, only when the user asks; it lands in the Inbox unless a project is given. update_task changes only the fields it is given. archive_task is reversible with restore_task; there is no delete. ensure_github_issue_task is idempotent and never plans the task unless planToday=true.',
     },
   );
 
@@ -596,6 +596,52 @@ export const createMcpServer = ({ config, client, logger }: ServerDependencies):
         }
         const task = await client.updateTask(taskId, changes);
         return { updated: true, task: summarizeTask(task) };
+      }, logger),
+  );
+
+  server.registerTool(
+    'archive_task',
+    {
+      title: 'Archive one task',
+      description:
+        'Move exactly one top-level task and its subtasks to the archive. Super Productivity marks archived tasks done (done today if they were open), clears their due date and reminder, and keeps them in the worklog. Subtasks cannot be archived on their own. Undo with restore_task; find archived tasks with search_tasks and source "archived". Only archive tasks the user asked to archive; do not use it to tidy up.',
+      inputSchema: taskActionInputSchema,
+      annotations: { ...STATE_CHANGE_ANNOTATIONS, idempotentHint: false },
+    },
+    async (input: TaskActionInput) =>
+      withToolErrors(async () => {
+        const task = await client.getTask(input.taskId);
+        // 19.0.1 archives only parent tasks; for a subtask it answers
+        // archived: true without archiving it (or strips the open tag view).
+        if (task.parentId) {
+          throw new AppError(
+            'INVALID_INPUT',
+            'Subtasks cannot be archived on their own; archive the parent task instead',
+          );
+        }
+        await client.archiveTask(task.id);
+        return {
+          archived: true,
+          taskId: task.id,
+          title: task.title,
+          subTaskCount: task.subTaskIds?.length ?? 0,
+        };
+      }, logger),
+  );
+
+  server.registerTool(
+    'restore_task',
+    {
+      title: 'Restore one archived task',
+      description:
+        'Move exactly one archived task and its subtasks back to the active lists, marked not done. The due date cleared by archiving does not come back. Right after restoring, the task may briefly still appear in archived searches.',
+      inputSchema: taskActionInputSchema,
+      annotations: { ...STATE_CHANGE_ANNOTATIONS, idempotentHint: false },
+    },
+    async (input: TaskActionInput) =>
+      withToolErrors(async () => {
+        const task = await client.restoreTask(input.taskId);
+        return { restored: true, task: task ? summarizeTask(task) : null };
       }, logger),
   );
 

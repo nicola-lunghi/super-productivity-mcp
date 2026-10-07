@@ -567,3 +567,60 @@ describe('update_task', () => {
     await mcp.close();
   });
 });
+
+describe('archive_task and restore_task', () => {
+  const apiMock = (restoreData: unknown = testTask({ id: 'task-1', title: 'Paint' })) => {
+    const requests: string[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const { pathname } = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      requests.push(`${method} ${pathname}`);
+      if (pathname === '/tasks/task-1' && method === 'GET') {
+        return successResponse(testTask({ id: 'task-1', title: 'Paint', subTaskIds: ['sub-1'] }));
+      }
+      if (pathname === '/tasks/sub-1' && method === 'GET') {
+        return successResponse(testTask({ id: 'sub-1', parentId: 'task-1' }));
+      }
+      if (pathname === '/tasks/task-1/archive') {
+        return successResponse({ id: 'task-1', archived: true });
+      }
+      if (pathname === '/tasks/task-1/restore') return successResponse(restoreData);
+      throw new Error(`Unexpected mocked API request: ${method} ${pathname}`);
+    });
+    return { fetchMock, requests };
+  };
+
+  it('archives a top-level task and refuses to archive a subtask on its own', async () => {
+    const { fetchMock, requests } = apiMock();
+    const mcp = await connect(fetchMock);
+
+    const archived = await mcp.call('archive_task', { taskId: 'task-1' });
+    expect(archived.data).toEqual({
+      archived: true,
+      taskId: 'task-1',
+      title: 'Paint',
+      subTaskCount: 1,
+    });
+
+    const subTask = await mcp.call('archive_task', { taskId: 'sub-1' });
+    expect(subTask.data.error.code).toBe('INVALID_INPUT');
+    expect(requests).toEqual([
+      'GET /tasks/task-1',
+      'POST /tasks/task-1/archive',
+      'GET /tasks/sub-1',
+    ]);
+    await mcp.close();
+  });
+
+  it('restores a task, also when the reply carries no task', async () => {
+    const restored = await connect(apiMock().fetchMock);
+    const withTask = await restored.call('restore_task', { taskId: 'task-1' });
+    expect(withTask.data).toMatchObject({ restored: true, task: { id: 'task-1', isDone: false } });
+    await restored.close();
+
+    const empty = await connect(apiMock(null).fetchMock);
+    const withoutTask = await empty.call('restore_task', { taskId: 'task-1' });
+    expect(withoutTask.data).toEqual({ restored: true, task: null });
+    await empty.close();
+  });
+});
